@@ -1,0 +1,116 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Iris"
+date: "Sunday, June 21, 2015"
+output: html_document
+---
+
+# Practical Machine Learning Course Project
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+The training data for this project are available at <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>.
+
+The test data are available at <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>.
+
+In this project, we use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise.
+
+## Data Processing
+
+```{r,include=FALSE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+library(e1071)
+```
+
+First we download the data.
+
+```{r}
+setInternet2(use=TRUE)
+trainUrl<- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl<- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile<- download.file(trainUrl, destfile="./pml-training.csv")
+testFile<- download.file(testUrl, destfile="./pml-testing.csv")
+
+```
+
+Then we try to read the data into two data frames.
+
+```{r}
+trainRaw <- read.csv("./pml-training.csv")
+testRaw <- read.csv("./pml-testing.csv")
+```
+The "classe" variable in the training set is the outcome to predict.
+
+Now we can clean the data and get rid of missing values and anthing unecessary.
+
+```{r}
+trainRaw <- trainRaw[, colSums(is.na(trainRaw)) ==0]
+testRaw<- testRaw[, colSums(is.na(testRaw)) ==0]
+
+classe<-trainRaw$classe
+trainRemove <- grepl("^X|timestamp|window", names(trainRaw))
+trainRaw <- trainRaw[, !trainRemove]
+trainCleaned <- trainRaw[, sapply(trainRaw, is.numeric)]
+trainCleaned$classe <- classe
+testRemove <- grepl("^X|timestamp|window", names(testRaw))
+testRaw <- testRaw[, !testRemove]
+testCleaned <- testRaw[, sapply(testRaw, is.numeric)]
+```
+
+Now the datasets are clean and ready to use.
+
+## Split the data
+
+Then we split the cleaned training data into a pure training dataset (70%) and a validation data set(30%). We will use the validation data set to conduct cross validation in future steps.
+
+```{r}
+set.seed(22519) 
+inTrain <- createDataPartition(trainCleaned$classe, p=0.70, list=F)
+trainData <- trainCleaned[inTrain, ]
+testData <- trainCleaned[-inTrain, ]
+```
+
+## Data Modeling
+We first fit a predictive model using Random Forest algorithm because it automatically elects important variables and is robust to correlated covariantes and outliers in general. We use a 5-fold cross validation when applying the algorithm.
+
+```{r}
+controlRf <- trainControl(method="cv", 5)
+modelRf <- train(classe ~ ., data=trainData, method="rf", trControl=controlRf, ntree=250)
+modelRf
+```
+
+Then we estimate the performance of the model on the validation dataset.
+```{r}
+predictRf <- predict(modelRf, testData)
+confusionMatrix(testData$classe, predictRf)
+
+accuracy <- postResample(predictRf, testData$classe)
+accuracy
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+oose
+```
+
+So, the estimated accuracy of the model is 99.42% and the estimated out-of-sample error is 0.58%.
+
+## Predicting for Test Data Set
+Now, we apply the model to the original testing data set downloaded from the data source. We remove the problem_id column first.  
+```{r}
+result <- predict(modelRf, testCleaned[, -length(names(testCleaned))])
+result
+```  
+
+## Appendix: Figures
+1. Correlation Matrix Visualization  
+```{r}
+corrPlot <- cor(trainData[, -length(names(trainData))])
+corrplot(corrPlot, method="color")
+```
+2. Decision Tree Visualization
+```{r}
+treeModel <- rpart(classe ~ ., data=trainData, method="class")
+prp(treeModel)
+```
